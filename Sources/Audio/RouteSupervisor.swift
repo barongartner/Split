@@ -176,6 +176,161 @@ final class RouteSupervisor {
         reconcile()
     }
 
+    // MARK: - Sync wizard (beat-match calibration)
+
+    private(set) var isCalibrating = false
+    @ObservationIgnored private var phantomProbe: OutputProbe?
+    @ObservationIgnored private var delaysBeforeCalibration: [UUID: Double] = [:]
+
+    /// Route IDs the wizard can beat-match right now (enabled, tapped, engine live).
+    var tunableRouteIDs: [UUID] {
+        table.routes.filter { $0.isEnabled && $0.kind == .tapped && engines[$0.id] != nil }.map(\.id)
+    }
+
+    var directRoute: RouteConfig? {
+        table.routes.first { $0.kind == .direct && $0.isEnabled }
+    }
+
+    func beginCalibration() {
+        guard !isCalibrating else { return }
+        isCalibrating = true
+        delaysBeforeCalibration = Dictionary(uniqueKeysWithValues: table.routes.map { ($0.id, $0.delayMs) })
+        for (_, engine) in engines { engine.setProgramMuted(true) }
+    }
+
+    /// `revert: true` (cancel) puts every live engine's delay back to the
+    /// table's values; `false` (applied) leaves the freshly applied ones.
+    func endCalibration(revert: Bool) {
+        stopAllInjection()
+        phantomProbe?.invalidate()
+        phantomProbe = nil
+        for (id, engine) in engines {
+            engine.setProgramMuted(false)
+            if revert, let route = table.routes.first(where: { $0.id == id }) {
+                let delay = delaysBeforeCalibration[id] ?? route.delayMs
+                engine.update(volume: route.volume, delayMs: delay, muted: route.isMuted)
+            }
+        }
+        delaysBeforeCalibration.removeAll()
+        isCalibrating = false
+    }
+
+    func startTunerBeep(routeID: UUID, grid: BeatGrid) {
+        stopAllInjection()
+        guard let engine = engines[routeID] else { return }
+        engine.setInjection(InjectionCommand(mode: .tunerBeep,
+                                             t0Host: grid.t0Host,
+                                             periodFrames: grid.periodFrames(at: engine.sampleRate)))
+    }
+
+    /// The tuner turns the route's live delay; the table is untouched until Apply.
+    func setTunerDelay(routeID: UUID, ms: Double) {
+        guard let route = table.routes.first(where: { $0.id == routeID }),
+              let engine = engines[routeID] else { return }
+        engine.update(volume: route.volume, delayMs: ms, muted: route.isMuted)
+    }
+
+    /// Beep on the Direct route's device via a throwaway output probe.
+    @discardableResult
+    func startPhantomBeep(grid: BeatGrid) -> Bool {
+        stopAllInjection()
+        guard let leg = directRoute?.primaryLeg else { return false }
+        if phantomProbe == nil || phantomProbe?.deviceID != deviceMonitor.device(uid: leg.deviceUID)?.id {
+            phantomProbe?.invalidate()
+            phantomProbe = OutputProbe(deviceUID: leg.deviceUID)
+            do { try phantomProbe?.start() } catch { phantomProbe = nil }
+        }
+        guard let probe = phantomProbe else { return false }
+        probe.setInjection(InjectionCommand(mode: .tunerBeep,
+                                            t0Host: grid.t0Host,
+                                            periodFrames: grid.periodFrames(at: probe.sampleRate)))
+        return true
+    }
+
+    func setPhantomDelay(ms: Double) {
+        phantomProbe?.setDelay(ms: ms)
+    }
+
+    func startGroupClick(grid: BeatGrid) {
+        for (_, engine) in engines {
+            engine.setInjection(InjectionCommand(mode: .groupClick,
+                                                 t0Host: grid.t0Host,
+                                                 periodFrames: grid.periodFrames(at: engine.sampleRate)))
+        }
+        if let leg = directRoute?.primaryLeg {
+            if phantomProbe == nil {
+                phantomProbe = OutputProbe(deviceUID: leg.deviceUID)
+                do { try phantomProbe?.start() } catch { phantomProbe = nil }
+            }
+            phantomProbe?.setDelay(ms: 0)
+            if let probe = phantomProbe {
+                probe.setInjection(InjectionCommand(mode: .groupClick,
+                                                    t0Host: grid.t0Host,
+                                                    periodFrames: grid.periodFrames(at: probe.sampleRate)))
+            }
+        }
+    }
+
+    func stopAllInjection() {
+        for (_, engine) in engines { engine.setInjection(InjectionCommand()) }
+        phantomProbe?.setInjection(InjectionCommand())
+    }
+
+    /// Three seconds of clicks on one route — the Diagnostics "can you hear
+    /// this route at all" button.
+    func diagnosticsBeep(routeID: UUID) {
+        guard let engine = engines[routeID] else { return }
+        let grid = BeatGrid.startingSoon(periodMs: 500)
+        engine.setInjection(InjectionCommand(mode: .groupClick,
+                                             t0Host: grid.t0Host,
+                                             periodFrames: grid.periodFrames(at: engine.sampleRate)))
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            self?.engines[routeID]?.setInjection(InjectionCommand())
+        }
+    }
+
+    /// The tuned value of each route reveals its latency (plus a constant that
+    /// cancels). Final playback delay aligns everyone to the slowest:
+    /// final_i = max(tuned) − tuned_i. The Direct route can't be delayed; if
+    /// it isn't the slowest, `directLeadMs` says how far ahead it runs.
+    private(set) var directLeadMs: Double?
+
+    func applyTunedDelays(_ tuned: [UUID: Double], phantomTuned: Double?) {
+        var all = Array(tuned.values)
+        if let phantomTuned { all.append(phantomTuned) }
+        guard let maxTuned = all.max() else { return }
+
+        for (id, v) in tuned {
+            guard let idx = table.routes.firstIndex(where: { $0.id == id }) else { continue }
+            let final = min(max(maxTuned - v, 0), 1000)
+            table.routes[idx].delayMs = final
+            table.routes[idx].impliedLatencyMs = v
+            table.routes[idx].tunedAt = Date()
+            engines[id]?.update(volume: table.routes[idx].volume,
+                                delayMs: final,
+                                muted: table.routes[idx].isMuted)
+        }
+        directLeadMs = phantomTuned.map { maxTuned - $0 }
+        store.save(table: table)
+    }
+
+    var masterNudgeFloorMs: Double {
+        -(table.routes.filter { $0.isEnabled && $0.kind == .tapped }.map(\.delayMs).min() ?? 0)
+    }
+
+    /// Shifts the whole group against the picture; relative sync is preserved.
+    func nudgeAllTappedDelays(by deltaMs: Double) {
+        for idx in table.routes.indices where table.routes[idx].kind == .tapped && table.routes[idx].isEnabled {
+            let new = min(max(table.routes[idx].delayMs + deltaMs, 0), 1000)
+            table.routes[idx].delayMs = new
+            engines[table.routes[idx].id]?.update(volume: table.routes[idx].volume,
+                                                  delayMs: new,
+                                                  muted: table.routes[idx].isMuted)
+        }
+        store.save(table: table)
+    }
+
     private func persistAndReconcile() {
         store.save(table: table)
         reconcile()
@@ -353,6 +508,14 @@ final class RouteSupervisor {
             // No IO callbacks at all for 3+ seconds means the aggregate died.
             if t.lastIOAt > 0, now - t.lastIOAt > 3 {
                 rebuild(id)
+                continue
+            }
+
+            // During the sync wizard, program audio is muted engine-side, so
+            // "playing but silent" is expected — a rebuild here would tear
+            // down the very engine someone is beat-matching.
+            if isCalibrating {
+                zeroSince[id] = nil
                 continue
             }
 

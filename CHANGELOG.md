@@ -4,6 +4,24 @@ Versioning is semantic: fixes bump patch, features bump minor, breaking
 changes bump major. The version in Info.plist, the git tag, and the GitHub
 release name always match.
 
+## 1.1.0 — 2026-07-13
+
+Delay tuning stopped being homework.
+
+- **Sync wizard (beat-match)**: each listener watches a pulsing ring and taps
+  arrows until the beep in their headphones lands on it (~15 s per person).
+  Their answer doubles as a latency measurement, so Split aligns the whole
+  group to the slowest headphones automatically. No microphone, nothing to
+  hold, no new permissions.
+- Direct-route listeners get the same beat-match as a check; if their device
+  can't keep up with the group, Split says by how much instead of pretending.
+- **Group click test**: every route clicks at once — one click heard = synced.
+- **Master nudge**: one slider shifts everyone together to match the picture.
+- Route cards show when they were last synced, with a drift hint for
+  Bluetooth after half an hour.
+- Diagnostics gained a per-route Beep button (three seconds of clicks —
+  the fastest "is this route audible at all" check).
+
 ## 1.0.0 — 2026-07-13
 
 First release.

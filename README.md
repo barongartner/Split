@@ -49,13 +49,22 @@ play through a Direct route just fine, because nothing is being captured.
 Rule of thumb for movie night: the movie goes on the Direct route or in
 Chrome, music apps get tapped routes.
 
-### Syncing video across headphones
+### Syncing everyone (the Sync button)
 
-Bluetooth headphones run 150–300 ms behind wired ones, and it drifts over a
-session. You can't speed Bluetooth up, so you slow everyone else down: raise
-the delay on the wired/faster routes until lips sync. The slider starts at
-the device's self-reported latency, which for Bluetooth is a polite fiction —
-trust your ears, and expect to nudge it again half an hour in.
+Bluetooth headphones run 150–300 ms behind wired ones, so video needs the
+faster listeners delayed to match. You don't tune that by hand — hit **Sync**:
+
+Each listener, wearing their headphones on the couch, watches a pulsing ring
+and taps ← → until the beep in their ears lands on the pulse. About 15
+seconds per person. When someone's beep sits on the beat, their slider
+position has quietly measured their headphones' real latency — so after the
+last person, Split aligns the whole group to the slowest pair automatically.
+
+Then two optional checks: a **group click test** (every headphone clicks at
+once — the room hearing ONE click means you're synced) and a **master nudge**
+that shifts everyone together if the picture still feels off. Route cards
+show when they were last synced; Bluetooth latency drifts as the electronics
+warm up, so if lips wander mid-session, a re-sync is 15 seconds.
 
 ## Limits worth knowing
 

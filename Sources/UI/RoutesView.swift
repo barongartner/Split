@@ -7,6 +7,7 @@ struct RoutesView: View {
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("launchAtLogin") private var launchAtLogin = false
     @State private var showingAdd = false
+    @State private var showingSync = false
     @State private var showingSavePreset = false
     @State private var presetName = ""
 
@@ -34,6 +35,15 @@ struct RoutesView: View {
             ToolbarItem(placement: .automatic) { presetsMenu }
             ToolbarItem(placement: .automatic) {
                 Button {
+                    showingSync = true
+                } label: {
+                    Label("Sync", systemImage: "metronome")
+                }
+                .help("Beat-match everyone's headphones — ~15 seconds per person")
+                .disabled(supervisor.table.routes.isEmpty)
+            }
+            ToolbarItem(placement: .automatic) {
+                Button {
                     openWindow(id: "diagnostics")
                 } label: {
                     Label("Diagnostics", systemImage: "waveform.badge.magnifyingglass")
@@ -50,6 +60,10 @@ struct RoutesView: View {
         }
         .sheet(isPresented: $showingAdd) {
             AddRouteView()
+                .environment(supervisor)
+        }
+        .sheet(isPresented: $showingSync) {
+            SyncWizardView()
                 .environment(supervisor)
         }
         .sheet(isPresented: onboardingBinding) {

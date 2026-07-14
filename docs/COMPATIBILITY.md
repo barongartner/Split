@@ -53,6 +53,9 @@ if a row above disagrees with a dated entry here, trust the entry.
 | 2026-07-13 | Split full pipeline: Chrome (YouTube) → tapped route → Built-in Output | ✅ active in <10 s, stable levels for 60 s, no dropouts |
 | 2026-07-13 | Paused-but-open stream (paused YouTube tab) must NOT flag as DRM | ✅ after the ever-had-audio watchdog fix |
 | 2026-07-13 | Quit mid-playback: clean exit, default output restored, routes persist | ✅ |
+| 2026-07-13 | Beep scheduler simulation: grid periodicity, ± delay sign per mode, block-boundary continuity | ✅ 7/7 |
+| 2026-07-13 | Beat scheduling end-to-end through a real engine (real tap + aggregate + IOProc), captured and measured | ✅ intervals 1000.0 ms; tuner −200.0 ms and click +200.0 ms shifts, exact |
+| — | Beat-match feel on a real Bluetooth headphone; group click across speakers + BT | pending |
 | — | Apple Music app tapped | pending |
 | — | Apple TV app on Direct route | pending |
 | — | Netflix in Safari (expect silence + DRM flag) / in Chrome (expect capture) | pending |

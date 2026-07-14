@@ -25,6 +25,9 @@ struct DiagnosticsView: View {
                                 .frame(width: 120)
                             Text(String(format: "%.4f", supervisor.levels[route.id] ?? 0))
                                 .font(.caption.monospacedDigit())
+                            Button("Beep") { supervisor.diagnosticsBeep(routeID: route.id) }
+                                .font(.caption)
+                                .help("3 seconds of clicks through this route — the fastest 'is it audible at all' check")
                         }
                     }
                     Button("Force Rebuild All Routes") { supervisor.forceRebuildAll() }

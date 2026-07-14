@@ -40,6 +40,10 @@ final class RouteEngine {
         var gain: Float = 1
         var delayFrames: Int32 = 0
         var muted = false
+        /// Mutes program audio without touching the user's mute — used while
+        /// the sync wizard beeps so listeners hear only the beat.
+        var programMuted = false
+        var injection = InjectionCommand()
     }
 
     private var paramsLock = os_unfair_lock()
@@ -51,6 +55,7 @@ final class RouteEngine {
     // Audio-thread-owned state (never touched from other threads).
     private var rtParams = Params()
     private var rtGain: Float = 0        // smoothed gain, ramps toward rtParams.gain
+    private var rtInjector: BeepInjector
     private let rtScratch: UnsafeMutablePointer<Float32>
     private let rtScratchFrames = 8192
     private let fadeFrames: Int
@@ -68,6 +73,7 @@ final class RouteEngine {
         // 2 seconds of history bounds the delay slider; +1 block of headroom.
         delayLine = DelayLine(capacityFrames: Int(rate * 2) + 8192, channels: max(channels, 1))
         fadeFrames = Int(rate * 0.010)
+        rtInjector = BeepInjector(sampleRate: rate)
 
         rtScratch = .allocate(capacity: rtScratchFrames * max(channels, 1))
         rtScratch.initialize(repeating: 0, count: rtScratchFrames * max(channels, 1))
@@ -79,6 +85,7 @@ final class RouteEngine {
     deinit {
         invalidate()
         rtScratch.deallocate()
+        rtInjector.destroy()
     }
 
     var sampleRate: Double { identity.sampleRate }
@@ -99,9 +106,10 @@ final class RouteEngine {
         // Per-sample one-pole coefficient for a ~30 ms gain ramp (no zipper noise).
         let rampCoef: Float = 1.0 - exp(-1.0 / (0.030 * Float(identity.sampleRate)))
 
-        var err = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, tap.aggregateID, nil) { [weak self] _, inInputData, _, outOutputData, _ in
+        var err = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, tap.aggregateID, nil) { [weak self] _, inInputData, _, outOutputData, inOutputTime in
             guard let self else { return }
             self.render(inInputData: inInputData, outOutputData: outOutputData,
+                        outputHostTime: inOutputTime.pointee.mHostTime,
                         channels: channels, delayLine: delayLine,
                         scratch: scratch, scratchFrames: scratchFrames,
                         fade: fade, rampCoef: rampCoef)
@@ -137,6 +145,20 @@ final class RouteEngine {
         os_unfair_lock_unlock(&paramsLock)
     }
 
+    /// Sync-wizard controls: silence program audio without touching the user's
+    /// mute, and arm/disarm the beat beep or group click.
+    func setProgramMuted(_ m: Bool) {
+        os_unfair_lock_lock(&paramsLock)
+        params.programMuted = m
+        os_unfair_lock_unlock(&paramsLock)
+    }
+
+    func setInjection(_ cmd: InjectionCommand) {
+        os_unfair_lock_lock(&paramsLock)
+        params.injection = cmd
+        os_unfair_lock_unlock(&paramsLock)
+    }
+
     func readTelemetry() -> RouteTelemetry {
         os_unfair_lock_lock(&telemetryLock)
         defer { os_unfair_lock_unlock(&telemetryLock) }
@@ -147,6 +169,7 @@ final class RouteEngine {
 
     private func render(inInputData: UnsafePointer<AudioBufferList>,
                         outOutputData: UnsafeMutablePointer<AudioBufferList>,
+                        outputHostTime: UInt64,
                         channels: Int, delayLine: DelayLine,
                         scratch: UnsafeMutablePointer<Float32>, scratchFrames: Int,
                         fade: Int, rampCoef: Float) {
@@ -159,19 +182,33 @@ final class RouteEngine {
         let inABL = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inInputData))
         let outABL = UnsafeMutableAudioBufferListPointer(outOutputData)
 
-        guard let inBuf = inABL.first(where: { $0.mData != nil }), let inData = inBuf.mData else { return }
-        let inChannels = max(Int(inBuf.mNumberChannels), 1)
-        let frames = Int(inBuf.mDataByteSize) / (MemoryLayout<Float32>.size * inChannels)
-        guard frames > 0, frames <= scratchFrames else { return }
+        // Program audio comes from the tap; the sync beep is injected below
+        // even when the tap delivers nothing, so frame count falls back to the
+        // output buffers when the input side is empty.
+        let inBuf = inABL.first(where: { $0.mData != nil })
+        var inChannels = max(channels, 1)
+        var frames = 0
+        if let inBuf, let inData = inBuf.mData {
+            inChannels = max(Int(inBuf.mNumberChannels), 1)
+            frames = Int(inBuf.mDataByteSize) / (MemoryLayout<Float32>.size * inChannels)
+            guard frames > 0, frames <= scratchFrames else { return }
 
-        let input = inData.bindMemory(to: Float32.self, capacity: frames * inChannels)
+            let input = inData.bindMemory(to: Float32.self, capacity: frames * inChannels)
 
-        // Delay.
-        delayLine.write(input, frames: frames)
-        delayLine.read(into: scratch, frames: frames, delayFrames: Int(rtParams.delayFrames), fadeFrames: fade)
+            // Delay.
+            delayLine.write(input, frames: frames)
+            delayLine.read(into: scratch, frames: frames, delayFrames: Int(rtParams.delayFrames), fadeFrames: fade)
+        } else {
+            guard let outBuf = outABL.first(where: { $0.mData != nil }) else { return }
+            let oc = max(Int(outBuf.mNumberChannels), 1)
+            frames = Int(outBuf.mDataByteSize) / (MemoryLayout<Float32>.size * oc)
+            guard frames > 0, frames <= scratchFrames else { return }
+            memset(scratch, 0, frames * inChannels * MemoryLayout<Float32>.size)
+        }
 
-        // Gain ramp + meters.
-        let targetGain: Float = rtParams.muted ? 0 : rtParams.gain
+        // Gain ramp + meters (program audio only — the beep is added after and
+        // stays out of the meters/watchdog on purpose).
+        let targetGain: Float = (rtParams.muted || rtParams.programMuted) ? 0 : rtParams.gain
         var peak: Float = 0
         var sumSquares: Float = 0
         var g = rtGain
@@ -187,6 +224,15 @@ final class RouteEngine {
             }
         }
         rtGain = g
+
+        // Sync beep / group click, scheduled on the shared grid. Post-gain so
+        // its level is constant regardless of volume or mute.
+        if rtParams.injection.mode != .off {
+            rtInjector.mix(into: scratch, frames: frames, channels: inChannels,
+                           blockHost: outputHostTime,
+                           cmd: rtParams.injection,
+                           delayFrames: Int(rtParams.delayFrames))
+        }
 
         // Output: map our (usually stereo) frames onto each output stream.
         for outBuf in outABL {

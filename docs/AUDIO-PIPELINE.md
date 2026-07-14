@@ -80,6 +80,38 @@ The slider's starting value comes from `kAudioDevicePropertyLatency` +
 number that tracks nothing — AirPods really measure ~220 ms cold and ~155 ms
 half an hour later. Hence a live slider and not a calibration wizard.
 
+## The sync beep
+
+The beat-match tuner and the group click test inject a 5 ms Hann-windowed
+2 kHz pip into the IOProc's scratch buffer *after* the delay line and gain
+stage, just before the output copy. Consequences of that placement, all
+deliberate:
+
+- The pip's level is constant regardless of route volume or mute, and program
+  audio can be silenced during tuning without silencing the beat.
+- It stays out of the meters and the watchdog (those measure program audio).
+- It works while the routed app is paused or silent — IOProcs keep firing on
+  a tap aggregate either way.
+
+Every route derives its beeps from one shared grid: a mach-time anchor plus a
+1 s period. The scheduler compares each block's `inOutputTime.mHostTime` (the
+HAL's projection of when that buffer hits the device — NOT the wall clock,
+which leads the device by a different amount per device) against the grid and
+drops the pip at the exact frame offset. Two modes, one sign apart:
+
+```
+tuner beep:  onset at grid_tick − delay    (the listener slides their beep
+                                            onto the on-screen pulse; the
+                                            value they land on reveals their
+                                            headphones' latency)
+group click: onset at grid_tick + delay    (what playback actually does, so
+                                            the room hears the applied result)
+```
+
+After everyone tunes, final delays are `max(tuned) − tuned_i` — align to the
+slowest. Verified end-to-end on hardware: onsets land on the grid with 1000.0
+ms spacing, and a 200 ms delay moves them by exactly ∓200.0 ms per mode.
+
 ## Teardown
 
 Exact order, always: `AudioDeviceStop` → `AudioDeviceDestroyIOProcID` →

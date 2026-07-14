@@ -31,6 +31,9 @@ struct RouteConfig: Codable, Equatable, Identifiable {
     var delayMs: Double = 0            // 0...1000, tapped only
     var isMuted: Bool = false
     var isEnabled: Bool = true
+    // Set by the sync wizard. Optionals so pre-1.1 routes.json decodes as-is.
+    var impliedLatencyMs: Double?      // what the beat-match revealed
+    var tunedAt: Date?
 
     var primaryLeg: OutputLeg? { legs.first }
 }

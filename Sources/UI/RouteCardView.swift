@@ -38,6 +38,7 @@ struct RouteCardView: View {
 
             if route.kind == .tapped {
                 controls
+                syncCaption
                 hints
             } else {
                 Text("Direct route: this device is the system output. Anything you don't route — including DRM video apps like Apple TV — plays here. No delay is added, so tune the other routes' delays to match this one.")
@@ -164,6 +165,20 @@ struct RouteCardView: View {
                         .frame(width: 52, alignment: .trailing)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var syncCaption: some View {
+        if route.kind == .tapped, let tunedAt = route.tunedAt {
+            let minutes = Int(-tunedAt.timeIntervalSinceNow / 60)
+            let isBT = route.primaryLeg.flatMap { supervisor.deviceMonitor.device(uid: $0.deviceUID)?.isBluetooth } ?? false
+            let stale = isBT && minutes > 30
+            Text(stale
+                 ? "synced \(minutes) min ago — Bluetooth drifts as it warms up; a 15-second re-sync keeps lips honest"
+                 : "synced \(minutes < 1 ? "just now" : "\(minutes) min ago")")
+                .font(.caption)
+                .foregroundStyle(stale ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
         }
     }
 
