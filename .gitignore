@@ -1,0 +1,4 @@
+.build/
+Split.app/
+.DS_Store
+*.o
