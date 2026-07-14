@@ -48,8 +48,13 @@ if a row above disagrees with a dated entry here, trust the entry.
 
 | Date | Test | Result |
 |---|---|---|
-| 2026-07-13 | Tap chain end-to-end (tone → afplay tapped → capture + passthrough) | see below |
+| 2026-07-13 | Tap chain end-to-end: 440 Hz tone → tapped by PID → captured | ✅ RMS 0.065, 99.4% non-zero samples, first audio at 70 ms |
+| 2026-07-13 | `.mutedWhenTapped`: capture keeps flowing while the app is muted at system output | ✅ identical RMS with mute on |
+| 2026-07-13 | Split full pipeline: Chrome (YouTube) → tapped route → Built-in Output | ✅ active in <10 s, stable levels for 60 s, no dropouts |
+| 2026-07-13 | Paused-but-open stream (paused YouTube tab) must NOT flag as DRM | ✅ after the ever-had-audio watchdog fix |
+| 2026-07-13 | Quit mid-playback: clean exit, default output restored, routes persist | ✅ |
 | — | Apple Music app tapped | pending |
 | — | Apple TV app on Direct route | pending |
-| — | Netflix in Safari (expect silence) / in Chrome (expect capture) | pending |
+| — | Netflix in Safari (expect silence + DRM flag) / in Chrome (expect capture) | pending |
 | — | 2×BT + 1 wired, three simultaneous streams, 45 min | pending |
+| — | Routed app quit/relaunch re-tap; sleep/wake | pending |

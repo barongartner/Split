@@ -45,6 +45,12 @@ final class RouteSupervisor {
     @ObservationIgnored private var watchdogTimer: Timer?
     @ObservationIgnored private var zeroSince: [UUID: TimeInterval] = [:]
     @ObservationIgnored private var lastRebuildAt: [UUID: TimeInterval] = [:]
+    /// Routes that have produced at least one non-zero sample since they were
+    /// created or edited. DRM'd sources never produce a single one, which is
+    /// the only reliable way to tell "protected" from "paused": a paused tab
+    /// keeps the app's audio unit running with genuine silence.
+    @ObservationIgnored private var everHadAudio: Set<UUID> = []
+    @ObservationIgnored private var silentRebuilds: [UUID: Int] = [:]
     @ObservationIgnored private var buildsInFlight: Set<UUID> = []
     @ObservationIgnored private let buildQueue = DispatchQueue(label: "split.route-build", qos: .userInitiated)
 
@@ -136,8 +142,13 @@ final class RouteSupervisor {
         let leg = table.routes[idx].legs
         table.routes.removeAll { $0.kind == .direct }
         if let idx2 = table.routes.firstIndex(where: { $0.id == routeID }) {
+            // A Direct route isn't bound to an app anymore — it's the bucket
+            // everything unrouted (including the app that brought us here)
+            // falls into. Rename accordingly or the card reads like a lie.
             table.routes[idx2].kind = .direct
             table.routes[idx2].legs = leg
+            table.routes[idx2].appBundleIDs = []
+            table.routes[idx2].appDisplayName = "Everything else"
         }
         persistAndReconcile()
     }
@@ -209,6 +220,8 @@ final class RouteSupervisor {
             teardownEngine(for: id)
         }
         statuses = statuses.filter { seen.contains($0.key) }
+        everHadAudio = everHadAudio.intersection(seen)
+        silentRebuilds = silentRebuilds.filter { seen.contains($0.key) }
 
         // If no enabled Direct route remains, give the system default back.
         let directActive = table.routes.contains { $0.kind == .direct && $0.isEnabled }
@@ -347,23 +360,53 @@ final class RouteSupervisor {
                 let since = zeroSince[id] ?? now
                 zeroSince[id] = since
                 let zeroFor = now - since
-                if zeroFor > 5, (lastRebuildAt[id].map { now - $0 > 30 } ?? true) {
-                    // One rebuild attempt — this recovers the known tap-decay bug.
+                // Silent rebuilds back off exponentially (30 s, 60 s, …) so a
+                // paused-but-open stream doesn't churn taps forever, while the
+                // first rebuild still lands fast enough to fix the tap-decay
+                // bug and the built-before-permission case.
+                let attempts = silentRebuilds[id] ?? 0
+                let cooldown = 30.0 * Double(1 << min(attempts, 4))
+                if zeroFor > 5, (lastRebuildAt[id].map { now - $0 > cooldown } ?? true) {
+                    silentRebuilds[id] = attempts + 1
                     rebuild(id)
-                } else if zeroFor > 12 {
-                    // Rebuilt and still silent while playing: almost certainly
-                    // protected audio (or a permission denial).
+                } else if zeroFor > 12, attempts >= 1, !everHadAudio.contains(id) {
+                    // Rebuilt, still not one non-zero sample ever: protected
+                    // audio (or a denied permission — indistinguishable).
                     statuses[id] = .protectedAudio
                 }
             } else {
                 zeroSince[id] = nil
                 if t.peak > 1e-6 {
+                    everHadAudio.insert(id)
+                    silentRebuilds[id] = 0
                     statuses[id] = .active
                 } else if statuses[id] == .active {
                     statuses[id] = .waitingForAudio
                 }
             }
         }
+
+        dumpStatus()
+    }
+
+    /// One line of machine-readable truth per second, next to routes.json.
+    /// Everything in this API fails silently, so having the live state on disk
+    /// turns "is it working?" from guesswork into `cat status.json`.
+    private func dumpStatus() {
+        var routesDump: [[String: Any]] = []
+        for route in table.routes {
+            routesDump.append([
+                "app": route.appDisplayName,
+                "kind": route.kind.rawValue,
+                "device": route.primaryLeg?.deviceName ?? "",
+                "status": String(describing: statuses[route.id] ?? RouteStatus.disabled),
+                "level": Double(levels[route.id] ?? 0),
+            ])
+        }
+        let dump: [String: Any] = ["at": Date().timeIntervalSince1970, "routes": routesDump]
+        guard let data = try? JSONSerialization.data(withJSONObject: dump, options: [.prettyPrinted, .sortedKeys]) else { return }
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        try? data.write(to: base.appendingPathComponent("Split/status.json"), options: .atomic)
     }
 
     private func rebuild(_ id: UUID) {

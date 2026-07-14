@@ -4,7 +4,7 @@ Versioning is semantic: fixes bump patch, features bump minor, breaking
 changes bump major. The version in Info.plist, the git tag, and the GitHub
 release name always match.
 
-## 1.0.0 — unreleased
+## 1.0.0 — 2026-07-13
 
 First release.
 
