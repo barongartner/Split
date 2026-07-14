@@ -56,6 +56,10 @@ final class AudioProcessMonitor {
             guard let owner = Self.owningApp(forPID: pid, helperBundleID: CA.processBundleID(objectID)) else { continue }
 
             let playing = CA.processIsRunningOutput(objectID)
+            // System daemons (assistantd, mediaremoted, …) all register audio
+            // processes. Nobody wants to route those — hide anything that
+            // isn't a real, user-visible app unless it's audibly playing.
+            guard owner.isRealApp || playing else { continue }
             if var existing = grouped[owner.bundleID] {
                 existing.objectIDs.append(objectID)
                 existing.pids.append(pid)
@@ -89,7 +93,11 @@ final class AudioProcessMonitor {
 
     // MARK: - Helper-process grouping
 
-    private struct Owner { let bundleID: String; let name: String }
+    private struct Owner {
+        let bundleID: String
+        let name: String
+        let isRealApp: Bool   // user-visible app vs faceless daemon/helper
+    }
 
     private static func owningApp(forPID pid: pid_t, helperBundleID: String?) -> Owner? {
         // Fast path: the helper's bundle ID is the app's bundle ID plus a
@@ -101,7 +109,7 @@ final class AudioProcessMonitor {
                     let base = String(helperBundleID.dropLast(suffix.count))
                     if let app = NSRunningApplication.runningApplications(withBundleIdentifier: base).first,
                        let bid = app.bundleIdentifier {
-                        return Owner(bundleID: bid, name: app.localizedName ?? bid)
+                        return Owner(bundleID: bid, name: app.localizedName ?? bid, isRealApp: true)
                     }
                 }
             }
@@ -114,7 +122,7 @@ final class AudioProcessMonitor {
             if let app = NSRunningApplication(processIdentifier: current),
                let bid = app.bundleIdentifier,
                app.activationPolicy != .prohibited {
-                return Owner(bundleID: bid, name: app.localizedName ?? bid)
+                return Owner(bundleID: bid, name: app.localizedName ?? bid, isRealApp: true)
             }
             var info = proc_bsdinfo()
             let size = proc_pidinfo(current, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size))
@@ -126,10 +134,10 @@ final class AudioProcessMonitor {
 
         // Last resort: the process itself, even if it's a faceless helper.
         if let app = NSRunningApplication(processIdentifier: pid), let bid = app.bundleIdentifier {
-            return Owner(bundleID: bid, name: app.localizedName ?? bid)
+            return Owner(bundleID: bid, name: app.localizedName ?? bid, isRealApp: false)
         }
         if let helperBundleID {
-            return Owner(bundleID: helperBundleID, name: helperBundleID)
+            return Owner(bundleID: helperBundleID, name: helperBundleID, isRealApp: false)
         }
         return nil
     }
