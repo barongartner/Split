@@ -12,18 +12,21 @@ macOS can't do any of this out of the box: there's one default output and no
 per-app routing. Split fixes that with the Core Audio process-tap API
 (macOS 14.4+). No kernel extensions, no virtual audio drivers to install.
 
-## Building
+## Installing
 
-```
-./build.sh
-open Split.app
-```
+Grab the `.dmg` (or `.zip`) from the
+[latest release](https://github.com/barongartner/Split/releases/latest), open
+it, and drag **Split** into Applications. Nothing to build, nothing else to
+install.
 
-That's it — no Xcode project, no dependencies. You do need Xcode's toolchain
-installed, and you want an "Apple Development" certificate in your keychain
-(sign into Xcode with any Apple ID, free). Without one the build falls back to
-ad-hoc signing and macOS forgets the audio permission on every rebuild, which
-gets old fast. See [docs/PERMISSIONS-AND-SIGNING.md](docs/PERMISSIONS-AND-SIGNING.md).
+First launch only: Split isn't notarized by Apple (that program costs $99 a
+year; this app is free), so macOS will balk once. On macOS 15: try to open
+Split, then go to **System Settings → Privacy & Security**, scroll down, and
+click **Open Anyway**. On older macOS: right-click Split → Open → Open. You
+do this exactly once.
+
+When you add your first route, macOS asks to allow **System Audio Recording**
+— that's the capture permission everything depends on. Allow it, also once.
 
 ## Using it
 
@@ -102,6 +105,19 @@ the watchdog notes). Long version:
 
 macOS 14.4 or later. Built and tested on an Intel MacBook running macOS 15.5;
 everything is architecture-independent.
+
+## Hacking on it
+
+```
+./build.sh            # compile + sign Split.app (needs Xcode's toolchain)
+./build.sh release    # also produce the dist/ zip + dmg that go on a release
+```
+
+No Xcode project, no dependencies — one script. You want an "Apple
+Development" certificate in your keychain (sign into Xcode with any Apple ID,
+free): the audio permission is keyed to the signing identity, and without a
+stable one macOS forgets the grant on every rebuild. Details in
+[docs/PERMISSIONS-AND-SIGNING.md](docs/PERMISSIONS-AND-SIGNING.md).
 
 ## License
 

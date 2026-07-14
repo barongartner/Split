@@ -74,6 +74,29 @@ sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" \
 
 `auth_value` 2 means granted, 0 means denied.
 
+## Distributing to other Macs
+
+Users install from the release `.dmg`/`.zip` — never from source. What they
+hit and why:
+
+- **The one-time Gatekeeper hoop.** Split is signed with an Apple Development
+  certificate but not notarized — notarization requires the $99/year
+  Developer Program. So the first launch on a new Mac needs System Settings →
+  Privacy & Security → **Open Anyway** (macOS 15) or right-click → Open
+  (earlier). Once per Mac, then never again.
+- **Signatures are timestamped** (`codesign --timestamp` in build.sh), so a
+  release keeps launching after the signing certificate expires — Apple
+  Development certs only live a year, and a customer's download shouldn't
+  care.
+- **The audio permission travels fine.** TCC keys the grant to the signing
+  identity + bundle ID, both of which are stable across releases, so updating
+  Split on any Mac keeps its System Audio Recording grant. (This is the same
+  reason ad-hoc signing was never an option — a new identity per build means
+  a new permission prompt per build.)
+- `./build.sh release` produces the artifacts (`dist/Split-<version>.zip` and
+  `.dmg`); the version comes from Info.plist, and the tag and release name
+  must match it.
+
 ## Indicators
 
 While any tap is live, macOS shows the system audio-capture indicator (the

@@ -2,3 +2,4 @@
 Split.app/
 .DS_Store
 *.o
+dist/

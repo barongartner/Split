@@ -4,6 +4,18 @@ Versioning is semantic: fixes bump patch, features bump minor, breaking
 changes bump major. The version in Info.plist, the git tag, and the GitHub
 release name always match.
 
+## 1.1.1 — 2026-07-13
+
+Distribution cleanup: users download a finished app, full stop.
+
+- Releases now carry a drag-to-Applications `.dmg` alongside the `.zip`,
+  produced by `./build.sh release`. Building from source is a developer
+  thing, and the README now reads that way.
+- Signatures carry a secure timestamp so releases keep launching after the
+  signing certificate expires.
+- README gained honest first-launch instructions for the Gatekeeper
+  "Open Anyway" step (Split isn't notarized — no $99 Apple membership).
+
 ## 1.1.0 — 2026-07-13
 
 Delay tuning stopped being homework.
