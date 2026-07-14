@@ -57,7 +57,7 @@ struct SyncWizardView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Sync everyone up")
                 .font(.title2.weight(.semibold))
-            Text("One at a time, each listener keeps their headphones on, watches the pulse, and taps ← → until the beep lands **on** the pulse. About 15 seconds per person. Split figures out the rest.")
+            Text("One at a time, each listener keeps their headphones on, watches the arrows fly toward the line, and taps ← → until the beep lands **right as they meet**. About 15 seconds per person. Split figures out the rest.")
             if routeIDs.isEmpty {
                 Text("No routes can be tuned right now — a route needs its app open (so its engine is live) before it can beep.")
                     .foregroundStyle(.orange)
@@ -86,7 +86,7 @@ struct SyncWizardView: View {
         let id = routeIDs[i]
         return beatMatchBody(
             title: "\(routeName(id)) → \(supervisor.table.routes.first { $0.id == id }?.primaryLeg?.deviceName ?? "")",
-            subtitle: "Whoever wears these headphones: tap ← → until the beep lands on the pulse. (⇧ for fine steps.)",
+            subtitle: "Whoever wears these headphones: tap ← → until the beep lands exactly when the arrows meet the line. (⇧ for fine steps.)",
             onChange: { supervisor.setTunerDelay(routeID: id, ms: tunerValue) },
             onConfirm: {
                 tuned[id] = tunerValue
@@ -129,8 +129,8 @@ struct SyncWizardView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            PulseRing(grid: grid)
-                .frame(width: 160, height: 160)
+            BeatTrack(grid: grid)
+                .frame(width: 460, height: 96)
 
             HStack(spacing: 12) {
                 Slider(value: Binding(
@@ -282,26 +282,70 @@ struct SyncWizardView: View {
     }
 }
 
-/// The visual beat: a ring that flares on every grid tick.
-struct PulseRing: View {
+/// The visual beat, rhythm-game style: an arrow flies in from each edge and
+/// they meet at the center line exactly on every grid tick. The eye can
+/// anticipate motion far better than it can react to a flash, which is why
+/// rhythm games render beats this way — and why this beats the old pulse ring.
+struct BeatTrack: View {
     let grid: BeatGrid
 
     var body: some View {
         TimelineView(.animation) { context in
-            let period = grid.periodMs / 1000.0
-            let t = context.date.timeIntervalSince(grid.date0)
-            let phase = t >= 0 ? t.truncatingRemainder(dividingBy: period) : period
-            let flare = phase < 0.20 ? 1.0 - phase / 0.20 : 0.0
+            Canvas { ctx, size in
+                let period = grid.periodMs / 1000.0
+                let t = context.date.timeIntervalSince(grid.date0)
+                // True modulo so the pre-anchor lead-in has the arrows already
+                // mid-flight, meeting the line dead on the very first beep.
+                var phase = (t.truncatingRemainder(dividingBy: period)) / period
+                if phase < 0 { phase += 1 }
+                let flash = phase < 0.10 ? 1.0 - phase / 0.10 : 0.0
 
-            ZStack {
-                Circle()
-                    .stroke(.tint.opacity(0.25), lineWidth: 6)
-                Circle()
-                    .stroke(.tint.opacity(0.25 + 0.75 * flare), lineWidth: 6)
-                    .scaleEffect(1.0 + 0.12 * flare)
-                Circle()
-                    .fill(.tint.opacity(0.10 + 0.45 * flare))
-                    .scaleEffect(0.55 + 0.1 * flare)
+                let midY = size.height / 2
+                let inset: CGFloat = 12
+                let centerX = size.width / 2
+
+                // The track.
+                var base = Path()
+                base.move(to: CGPoint(x: inset, y: midY))
+                base.addLine(to: CGPoint(x: size.width - inset, y: midY))
+                ctx.stroke(base, with: .color(Color.secondary.opacity(0.25)), lineWidth: 2)
+
+                // The center line — flares the instant the arrows meet.
+                let targetH = 24 + 14 * flash
+                var target = Path()
+                target.move(to: CGPoint(x: centerX, y: midY - targetH))
+                target.addLine(to: CGPoint(x: centerX, y: midY + targetH))
+                ctx.stroke(target,
+                           with: .color(Color.accentColor.opacity(0.7 + 0.3 * flash)),
+                           style: StrokeStyle(lineWidth: 3 + 3 * flash, lineCap: .round))
+                if flash > 0 {
+                    let r = 10 + 30 * (1 - flash)
+                    let burst = Path(ellipseIn: CGRect(x: centerX - r, y: midY - r,
+                                                       width: 2 * r, height: 2 * r))
+                    ctx.stroke(burst, with: .color(Color.accentColor.opacity(0.55 * flash)), lineWidth: 2)
+                }
+
+                // The arrows: tips travel edge → center, arriving on the tick,
+                // brightening and growing as they close in.
+                let travel = centerX - inset
+                let tipL = inset + travel * phase
+                let tipR = size.width - inset - travel * phase
+                let closeness = 0.45 + 0.55 * phase
+                let ah = 8 + 3 * phase   // arrow half-height
+                let aw = 13 + 4 * phase  // arrow length
+                let style = StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round)
+
+                var left = Path()
+                left.move(to: CGPoint(x: tipL - aw, y: midY - ah))
+                left.addLine(to: CGPoint(x: tipL, y: midY))
+                left.addLine(to: CGPoint(x: tipL - aw, y: midY + ah))
+                ctx.stroke(left, with: .color(Color.accentColor.opacity(closeness)), style: style)
+
+                var right = Path()
+                right.move(to: CGPoint(x: tipR + aw, y: midY - ah))
+                right.addLine(to: CGPoint(x: tipR, y: midY))
+                right.addLine(to: CGPoint(x: tipR + aw, y: midY + ah))
+                ctx.stroke(right, with: .color(Color.accentColor.opacity(closeness)), style: style)
             }
         }
     }

@@ -57,8 +57,9 @@ Chrome, music apps get tapped routes.
 Bluetooth headphones run 150–300 ms behind wired ones, so video needs the
 faster listeners delayed to match. You don't tune that by hand — hit **Sync**:
 
-Each listener, wearing their headphones on the couch, watches a pulsing ring
-and taps ← → until the beep in their ears lands on the pulse. About 15
+Each listener, wearing their headphones on the couch, watches two arrows fly
+toward a center line — they meet exactly on the beat, rhythm-game style — and
+taps ← → until the beep in their ears lands right as they meet. About 15
 seconds per person. When someone's beep sits on the beat, their slider
 position has quietly measured their headphones' real latency — so after the
 last person, Split aligns the whole group to the slowest pair automatically.

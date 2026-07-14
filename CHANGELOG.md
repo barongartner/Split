@@ -4,6 +4,13 @@ Versioning is semantic: fixes bump patch, features bump minor, breaking
 changes bump major. The version in Info.plist, the git tag, and the GitHub
 release name always match.
 
+## 1.1.2 — 2026-07-13
+
+- The beat-match visual is now a rhythm-game hit bar: an arrow flies in from
+  each edge and they meet at the center line exactly on the beat, flaring on
+  contact. Anticipating motion is easier than reacting to a flash, so tuning
+  gets faster and tighter. (Replaces the pulsing ring.)
+
 ## 1.1.1 — 2026-07-13
 
 Distribution cleanup: users download a finished app, full stop.
